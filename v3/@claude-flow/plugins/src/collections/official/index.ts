@@ -232,9 +232,7 @@ export const sonaPlugin = new PluginBuilder('sona-integration', '3.0.0')
   .withDescription('SONA self-optimizing neural architecture integration')
   .withAuthor('Claude Flow')
   .withTags(['intelligence', 'neural', 'learning'])
-  .withDependencies([
-    { name: 'memory-coordinator', version: '^3.0.0' },
-  ])
+  .withDependencies(['memory-coordinator@^3.0.0'])
   .withHooks([
     {
       event: HookEvent.PatternDetected,
@@ -405,9 +403,7 @@ export const consensusPlugin = new PluginBuilder('consensus', '3.0.0')
   .withDescription('Byzantine fault-tolerant consensus mechanisms')
   .withAuthor('Claude Flow')
   .withTags(['swarm', 'integration', 'consensus', 'byzantine'])
-  .withDependencies([
-    { name: 'hive-mind', version: '^3.0.0' },
-  ])
+  .withDependencies(['hive-mind@^3.0.0'])
   .build();
 
 /**

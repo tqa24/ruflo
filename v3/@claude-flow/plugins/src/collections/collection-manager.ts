@@ -7,7 +7,7 @@
 
 import type { IPlugin, PluginFactory } from '../core/plugin-interface.js';
 import type { PluginConfig } from '../types/index.js';
-import { PluginRegistry } from '../registry/plugin-registry.js';
+import type { PluginRegistry } from '../registry/plugin-registry.js';
 
 // ============================================================================
 // Types
@@ -75,6 +75,13 @@ export interface CollectionStats {
   byCategory: Record<PluginCategory, number>;
 }
 
+// Internal resolved entry with plugin name cached
+interface ResolvedEntry {
+  entry: PluginCollectionEntry;
+  pluginName: string;
+  plugin: IPlugin;
+}
+
 // ============================================================================
 // Collection Manager
 // ============================================================================
@@ -92,6 +99,7 @@ export interface CollectionStats {
  */
 export class PluginCollectionManager {
   private collections = new Map<string, PluginCollection>();
+  private resolvedEntries = new Map<string, ResolvedEntry[]>(); // collectionId -> entries
   private enabledOverrides = new Map<string, Set<string>>();  // Explicitly enabled
   private disabledOverrides = new Map<string, Set<string>>(); // Explicitly disabled
   private pluginSettings = new Map<string, Record<string, unknown>>();
@@ -115,14 +123,26 @@ export class PluginCollectionManager {
       throw new Error(`Collection ${collection.id} already loaded`);
     }
 
+    // Resolve all plugins upfront to cache names
+    const resolved: ResolvedEntry[] = [];
+    for (const entry of collection.plugins) {
+      const plugin = await this.resolvePlugin(entry.plugin);
+      resolved.push({
+        entry,
+        pluginName: plugin.metadata.name,
+        plugin,
+      });
+    }
+
     this.collections.set(collection.id, collection);
+    this.resolvedEntries.set(collection.id, resolved);
     this.enabledOverrides.set(collection.id, new Set());
     this.disabledOverrides.set(collection.id, new Set());
 
     // Register enabled plugins
-    for (const entry of collection.plugins) {
-      if (this.isPluginEnabled(collection.id, entry)) {
-        await this.registerPlugin(entry);
+    for (const { entry, pluginName, plugin } of resolved) {
+      if (this.isPluginEnabledSync(collection.id, pluginName, entry.defaultEnabled)) {
+        await this.registerResolvedPlugin(plugin, entry);
       }
     }
   }
@@ -131,19 +151,16 @@ export class PluginCollectionManager {
    * Unload a plugin collection.
    */
   async unloadCollection(collectionId: string): Promise<void> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
+    const resolved = this.resolvedEntries.get(collectionId);
+    if (!resolved) {
       throw new Error(`Collection ${collectionId} not found`);
     }
 
     // Unregister all plugins from this collection
-    for (const entry of collection.plugins) {
-      const plugin = await this.resolvePlugin(entry.plugin);
-      const name = plugin.metadata.name;
-
-      if (this.registry.getPlugin(name)) {
+    for (const { pluginName } of resolved) {
+      if (this.registry.getPlugin(pluginName)) {
         try {
-          await this.registry.unregister(name);
+          await this.registry.unregister(pluginName);
         } catch {
           // Ignore errors during unload
         }
@@ -151,6 +168,7 @@ export class PluginCollectionManager {
     }
 
     this.collections.delete(collectionId);
+    this.resolvedEntries.delete(collectionId);
     this.enabledOverrides.delete(collectionId);
     this.disabledOverrides.delete(collectionId);
   }
@@ -177,13 +195,8 @@ export class PluginCollectionManager {
    * Enable a plugin from a collection.
    */
   async enablePlugin(collectionId: string, pluginName: string): Promise<void> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
-      throw new Error(`Collection ${collectionId} not found`);
-    }
-
-    const entry = this.findPluginEntry(collection, pluginName);
-    if (!entry) {
+    const resolved = this.findResolvedEntry(collectionId, pluginName);
+    if (!resolved) {
       throw new Error(`Plugin ${pluginName} not found in collection ${collectionId}`);
     }
 
@@ -192,9 +205,8 @@ export class PluginCollectionManager {
     this.enabledOverrides.get(collectionId)?.add(pluginName);
 
     // Register if not already registered
-    const plugin = await this.resolvePlugin(entry.plugin);
-    if (!this.registry.getPlugin(plugin.metadata.name)) {
-      await this.registerPlugin(entry);
+    if (!this.registry.getPlugin(pluginName)) {
+      await this.registerResolvedPlugin(resolved.plugin, resolved.entry);
     }
   }
 
@@ -202,13 +214,8 @@ export class PluginCollectionManager {
    * Disable a plugin from a collection.
    */
   async disablePlugin(collectionId: string, pluginName: string): Promise<void> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
-      throw new Error(`Collection ${collectionId} not found`);
-    }
-
-    const entry = this.findPluginEntry(collection, pluginName);
-    if (!entry) {
+    const resolved = this.findResolvedEntry(collectionId, pluginName);
+    if (!resolved) {
       throw new Error(`Plugin ${pluginName} not found in collection ${collectionId}`);
     }
 
@@ -217,10 +224,9 @@ export class PluginCollectionManager {
     this.disabledOverrides.get(collectionId)?.add(pluginName);
 
     // Unregister if registered
-    const plugin = await this.resolvePlugin(entry.plugin);
-    if (this.registry.getPlugin(plugin.metadata.name)) {
+    if (this.registry.getPlugin(pluginName)) {
       try {
-        await this.registry.unregister(plugin.metadata.name);
+        await this.registry.unregister(pluginName);
       } catch {
         // May fail if other plugins depend on it
         throw new Error(`Cannot disable ${pluginName}: other plugins may depend on it`);
@@ -232,13 +238,10 @@ export class PluginCollectionManager {
    * Check if a plugin is enabled.
    */
   isEnabled(collectionId: string, pluginName: string): boolean {
-    const collection = this.collections.get(collectionId);
-    if (!collection) return false;
+    const resolved = this.findResolvedEntry(collectionId, pluginName);
+    if (!resolved) return false;
 
-    const entry = this.findPluginEntry(collection, pluginName);
-    if (!entry) return false;
-
-    return this.isPluginEnabled(collectionId, entry);
+    return this.isPluginEnabledSync(collectionId, pluginName, resolved.entry.defaultEnabled);
   }
 
   /**
@@ -262,14 +265,13 @@ export class PluginCollectionManager {
    * Enable all plugins in a collection.
    */
   async enableAll(collectionId: string): Promise<void> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
+    const resolved = this.resolvedEntries.get(collectionId);
+    if (!resolved) {
       throw new Error(`Collection ${collectionId} not found`);
     }
 
-    for (const entry of collection.plugins) {
-      const plugin = await this.resolvePlugin(entry.plugin);
-      await this.enablePlugin(collectionId, plugin.metadata.name);
+    for (const { pluginName } of resolved) {
+      await this.enablePlugin(collectionId, pluginName);
     }
   }
 
@@ -277,17 +279,16 @@ export class PluginCollectionManager {
    * Disable all plugins in a collection.
    */
   async disableAll(collectionId: string): Promise<void> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
+    const resolved = this.resolvedEntries.get(collectionId);
+    if (!resolved) {
       throw new Error(`Collection ${collectionId} not found`);
     }
 
     // Disable in reverse order to handle dependencies
-    const entries = [...collection.plugins].reverse();
-    for (const entry of entries) {
-      const plugin = await this.resolvePlugin(entry.plugin);
+    const entries = [...resolved].reverse();
+    for (const { pluginName } of entries) {
       try {
-        await this.disablePlugin(collectionId, plugin.metadata.name);
+        await this.disablePlugin(collectionId, pluginName);
       } catch {
         // Continue disabling others
       }
@@ -298,12 +299,11 @@ export class PluginCollectionManager {
    * Enable all plugins in a category across all collections.
    */
   async enableCategory(category: PluginCategory): Promise<void> {
-    for (const [collectionId, collection] of this.collections) {
-      for (const entry of collection.plugins) {
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      for (const { pluginName, entry } of resolved) {
         if (entry.category === category) {
-          const plugin = await this.resolvePlugin(entry.plugin);
           try {
-            await this.enablePlugin(collectionId, plugin.metadata.name);
+            await this.enablePlugin(collectionId, pluginName);
           } catch {
             // Continue with others
           }
@@ -316,13 +316,12 @@ export class PluginCollectionManager {
    * Disable all plugins in a category across all collections.
    */
   async disableCategory(category: PluginCategory): Promise<void> {
-    for (const [collectionId, collection] of this.collections) {
-      const entries = [...collection.plugins].reverse();
-      for (const entry of entries) {
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      const entries = [...resolved].reverse();
+      for (const { pluginName, entry } of entries) {
         if (entry.category === category) {
-          const plugin = await this.resolvePlugin(entry.plugin);
           try {
-            await this.disablePlugin(collectionId, plugin.metadata.name);
+            await this.disablePlugin(collectionId, pluginName);
           } catch {
             // Continue with others
           }
@@ -349,13 +348,13 @@ export class PluginCollectionManager {
       enabled: boolean;
     }> = [];
 
-    for (const [collectionId, collection] of this.collections) {
-      for (const entry of collection.plugins) {
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      for (const { entry, pluginName } of resolved) {
         if (entry.category === category) {
           results.push({
             collectionId,
             entry,
-            enabled: this.isPluginEnabled(collectionId, entry),
+            enabled: this.isPluginEnabledSync(collectionId, pluginName, entry.defaultEnabled),
           });
         }
       }
@@ -378,13 +377,13 @@ export class PluginCollectionManager {
       enabled: boolean;
     }> = [];
 
-    for (const [collectionId, collection] of this.collections) {
-      for (const entry of collection.plugins) {
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      for (const { entry, pluginName } of resolved) {
         if (entry.tags?.includes(tag)) {
           results.push({
             collectionId,
             entry,
-            enabled: this.isPluginEnabled(collectionId, entry),
+            enabled: this.isPluginEnabledSync(collectionId, pluginName, entry.defaultEnabled),
           });
         }
       }
@@ -396,13 +395,13 @@ export class PluginCollectionManager {
   /**
    * Search plugins by name or description.
    */
-  async searchPlugins(query: string): Promise<Array<{
+  searchPlugins(query: string): Array<{
     collectionId: string;
     entry: PluginCollectionEntry;
     pluginName: string;
     enabled: boolean;
     score: number;
-  }>> {
+  }> {
     const results: Array<{
       collectionId: string;
       entry: PluginCollectionEntry;
@@ -413,10 +412,9 @@ export class PluginCollectionManager {
 
     const queryLower = query.toLowerCase();
 
-    for (const [collectionId, collection] of this.collections) {
-      for (const entry of collection.plugins) {
-        const plugin = await this.resolvePlugin(entry.plugin);
-        const name = plugin.metadata.name.toLowerCase();
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      for (const { entry, pluginName, plugin } of resolved) {
+        const name = pluginName.toLowerCase();
         const description = (entry.description ?? plugin.metadata.description ?? '').toLowerCase();
 
         let score = 0;
@@ -443,8 +441,8 @@ export class PluginCollectionManager {
           results.push({
             collectionId,
             entry,
-            pluginName: plugin.metadata.name,
-            enabled: this.isPluginEnabled(collectionId, entry),
+            pluginName,
+            enabled: this.isPluginEnabledSync(collectionId, pluginName, entry.defaultEnabled),
             score,
           });
         }
@@ -539,21 +537,17 @@ export class PluginCollectionManager {
   }
 
   /**
-   * Save state to a JSON file.
+   * Save state to a JSON string.
    */
-  async saveState(path: string): Promise<void> {
-    const fs = await import('fs/promises');
-    const state = this.exportState();
-    await fs.writeFile(path, JSON.stringify(state, null, 2), 'utf-8');
+  serializeState(): string {
+    return JSON.stringify(this.exportState(), null, 2);
   }
 
   /**
-   * Load state from a JSON file.
+   * Load state from a JSON string.
    */
-  async loadState(path: string): Promise<void> {
-    const fs = await import('fs/promises');
-    const content = await fs.readFile(path, 'utf-8');
-    const state = JSON.parse(content) as CollectionManagerState;
+  deserializeState(json: string): void {
+    const state = JSON.parse(json) as CollectionManagerState;
     this.importState(state);
   }
 
@@ -564,7 +558,7 @@ export class PluginCollectionManager {
   /**
    * Get collection statistics.
    */
-  async getStats(): Promise<CollectionStats> {
+  getStats(): CollectionStats {
     const byCategory: Record<PluginCategory, number> = {
       agent: 0,
       task: 0,
@@ -581,12 +575,12 @@ export class PluginCollectionManager {
     let enabledPlugins = 0;
     let disabledPlugins = 0;
 
-    for (const [collectionId, collection] of this.collections) {
-      for (const entry of collection.plugins) {
+    for (const [collectionId, resolved] of this.resolvedEntries) {
+      for (const { entry, pluginName } of resolved) {
         totalPlugins++;
         byCategory[entry.category]++;
 
-        if (this.isPluginEnabled(collectionId, entry)) {
+        if (this.isPluginEnabledSync(collectionId, pluginName, entry.defaultEnabled)) {
           enabledPlugins++;
         } else {
           disabledPlugins++;
@@ -611,40 +605,33 @@ export class PluginCollectionManager {
     return typeof plugin === 'function' ? await plugin() : plugin;
   }
 
-  private async findPluginEntry(
-    collection: PluginCollection,
-    pluginName: string
-  ): Promise<PluginCollectionEntry | undefined> {
-    for (const entry of collection.plugins) {
-      const plugin = await this.resolvePlugin(entry.plugin);
-      if (plugin.metadata.name === pluginName) {
-        return entry;
-      }
-    }
-    return undefined;
+  private findResolvedEntry(collectionId: string, pluginName: string): ResolvedEntry | undefined {
+    const resolved = this.resolvedEntries.get(collectionId);
+    if (!resolved) return undefined;
+    return resolved.find(r => r.pluginName === pluginName);
   }
 
-  private async isPluginEnabled(
+  private isPluginEnabledSync(
     collectionId: string,
-    entry: PluginCollectionEntry
-  ): Promise<boolean> {
-    const plugin = await this.resolvePlugin(entry.plugin);
-    const name = plugin.metadata.name;
-
+    pluginName: string,
+    defaultEnabled: boolean
+  ): boolean {
     // Check explicit overrides first
-    if (this.enabledOverrides.get(collectionId)?.has(name)) {
+    if (this.enabledOverrides.get(collectionId)?.has(pluginName)) {
       return true;
     }
-    if (this.disabledOverrides.get(collectionId)?.has(name)) {
+    if (this.disabledOverrides.get(collectionId)?.has(pluginName)) {
       return false;
     }
 
     // Fall back to default
-    return entry.defaultEnabled;
+    return defaultEnabled;
   }
 
-  private async registerPlugin(entry: PluginCollectionEntry): Promise<void> {
-    const plugin = await this.resolvePlugin(entry.plugin);
+  private async registerResolvedPlugin(
+    plugin: IPlugin,
+    entry: PluginCollectionEntry
+  ): Promise<void> {
     const settings = this.pluginSettings.get(plugin.metadata.name);
 
     const config: Partial<PluginConfig> = {
@@ -653,10 +640,6 @@ export class PluginCollectionManager {
     };
 
     await this.registry.register(plugin, config);
-
-    if (this.autoInitialize) {
-      // Plugin will be initialized when registry.initialize() is called
-    }
   }
 }
 
