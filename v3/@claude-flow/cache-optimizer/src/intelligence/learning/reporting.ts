@@ -6,7 +6,7 @@
  */
 
 import type { TemporalTier, CacheEntryType } from '../../types.js';
-import type { MetricSnapshot, LearningMetrics, MetricAlert, TimeSeriesMetric } from './measurement.js';
+import type { MetricSnapshot, LearningMetrics, MetricAlert } from './measurement.js';
 import type { TuningTrial, RefinementResult, RefinementRecommendation } from './refinement.js';
 
 // ============================================================================
