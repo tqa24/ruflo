@@ -167,7 +167,7 @@ export class TemporalCompressor {
    * Embedding-based compression - store only vector representation
    */
   private async applyEmbeddingCompression(
-    entry: CacheEntry
+    _entry: CacheEntry
   ): Promise<{ tokens: number }> {
     // For embedding compression, we store only the reference
     // Actual content is retrievable via vector search
