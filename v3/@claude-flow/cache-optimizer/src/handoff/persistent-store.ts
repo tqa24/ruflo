@@ -158,6 +158,7 @@ export class PersistentStore {
 
   constructor(config?: Partial<PersistentStoreConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.fileLock = new FileLock(this.config.dbPath);
     this.currentMetrics = {
       totalRequests: 0,
       successfulRequests: 0,
