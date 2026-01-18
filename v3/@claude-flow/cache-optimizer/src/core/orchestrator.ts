@@ -168,8 +168,9 @@ export class CacheOptimizer {
 
   /**
    * Get all entries across all sessions
+   * @internal Used for iteration and debugging
    */
-  private getAllEntries(): CacheEntry[] {
+  private _getAllEntries(): CacheEntry[] {
     if (!this.sessionIsolation) {
       return Array.from(this.entries.values());
     }
