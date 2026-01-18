@@ -412,7 +412,7 @@ export class CacheOptimizer {
   /**
    * Handle PreCompact hook - last chance to prevent compaction
    */
-  async onPreCompact(trigger: 'auto' | 'manual'): Promise<HookResult> {
+  async onPreCompact(_trigger: 'auto' | 'manual'): Promise<HookResult> {
     const startTime = Date.now();
     const actions: HookAction[] = [];
 
