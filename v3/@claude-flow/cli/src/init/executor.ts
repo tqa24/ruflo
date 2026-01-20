@@ -98,6 +98,7 @@ const AGENTS_MAP: Record<string, string[]> = {
   hiveMind: ['hive-mind'],
   sparc: ['sparc'],
   swarm: ['swarm'],
+  browser: ['browser'],  // agent-browser integration
   // V3-specific agents
   v3: ['v3'],
   optimization: ['optimization'],
