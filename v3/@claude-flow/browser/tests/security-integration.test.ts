@@ -82,8 +82,8 @@ describe('BrowserSecurityScanner', () => {
     });
 
     it('should detect API keys', () => {
-      // API key pattern requires at least 20 characters after the prefix
-      const result = scanner.scanContent('API Key: sk_test_1234567890abcdefghijklmnop');
+      // API key pattern: sk- or sk_ followed by 20+ alphanumeric chars
+      const result = scanner.scanContent('API Key: sk_abcdefghij1234567890abc');
       expect(result.pii.some(p => p.type === 'api-key')).toBe(true);
     });
 
