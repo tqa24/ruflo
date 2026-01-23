@@ -382,6 +382,10 @@ class ContextMapper implements IContextMapper {
     return this.mappings.get(context);
   }
 
+  mapToV3Domain(context: BoundedContext): V3Domain[] {
+    return this.mappings.get(context)?.v3Domains ?? [];
+  }
+
   getV3DomainsForContext(context: BoundedContext): V3Domain[] {
     return this.mappings.get(context)?.v3Domains ?? [];
   }
