@@ -780,9 +780,7 @@ describe('ChaosInjectTool', () => {
         failureType: 'network-latency',
       });
 
-      expect(result.simulation?.recoverySteps).toContain(
-        expect.stringContaining('Monitor')
-      );
+      expect(result.simulation?.recoverySteps.some(s => s.includes('Monitor'))).toBe(true);
     });
 
     it('should include failure-type specific steps', async () => {
