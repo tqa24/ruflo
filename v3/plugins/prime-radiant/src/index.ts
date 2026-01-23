@@ -24,6 +24,29 @@
 export { PrimeRadiantPlugin } from './plugin';
 
 // ============================================================================
+// WASM Bridge Export
+// ============================================================================
+
+export {
+  WasmBridge,
+  createWasmBridge,
+  initializeWasmBridge
+} from './wasm-bridge';
+
+// ============================================================================
+// Engine Exports
+// ============================================================================
+
+export {
+  CohomologyEngine,
+  SpectralEngine,
+  CausalEngine,
+  QuantumEngine,
+  CategoryEngine,
+  HottEngine
+} from './engines';
+
+// ============================================================================
 // Type Exports
 // ============================================================================
 
