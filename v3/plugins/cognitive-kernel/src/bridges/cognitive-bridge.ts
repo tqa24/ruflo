@@ -106,7 +106,8 @@ export class CognitiveBridge {
     this._status = 'loading';
 
     try {
-      const wasmModule = await import('@ruvector/cognitum-gate-kernel').catch(() => null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wasmModule = await (import('@ruvector/cognitum-gate-kernel' as any) as Promise<unknown>).catch(() => null);
 
       if (wasmModule) {
         this._module = wasmModule as unknown as CognitiveModule;
