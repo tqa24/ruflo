@@ -100,8 +100,9 @@ export class NervousSystemBridge {
     this._status = 'loading';
 
     try {
-      // Try to load the WASM module
-      const wasmModule = await import('@ruvector/nervous-system-wasm').catch(() => null);
+      // Try to load the WASM module (optional dependency)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wasmModule = await (import('@ruvector/nervous-system-wasm' as any) as Promise<unknown>).catch(() => null);
 
       if (wasmModule) {
         this._module = wasmModule as unknown as NervousSystemModule;
