@@ -116,12 +116,11 @@ async function main() {
     splitSuggestTool.handler,
     {
       targetPath: '.',
-      strategy: 'cohesion',
+      strategy: 'minimize_coupling',  // Valid options: 'minimize_coupling', 'balance_size', 'feature_isolation'
       targetModules: 4,
       constraints: {
         minModuleSize: 3,
         maxModuleSize: 50,
-        preservePublicApi: true,
       },
     },
     context
