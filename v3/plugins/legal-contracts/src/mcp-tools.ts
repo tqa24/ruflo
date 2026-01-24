@@ -1055,7 +1055,7 @@ async function matchAgainstPlaybook(
   playbook: import('./types.js').Playbook,
   strictness: import('./types.js').PlaybookStrictness,
   suggestAlternatives: boolean,
-  attention: IAttentionBridge
+  _attention: IAttentionBridge
 ): Promise<PlaybookMatch[]> {
   const matches: PlaybookMatch[] = [];
 
