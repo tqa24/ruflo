@@ -689,23 +689,16 @@ const predictCommand: Command = {
 
     try {
       const { initializeIntelligence, findSimilarPatterns } = await import('../memory/intelligence.js');
-      const { generateEmbedding } = await import('../memory/memory-initializer.js');
 
       // Initialize intelligence system
       await initializeIntelligence();
 
-      // Generate embedding for input
-      const startEmbed = performance.now();
-      const embeddingResult = await generateEmbedding(input);
-      const embedTime = performance.now() - startEmbed;
-
-      // Find similar patterns
+      // Find similar patterns (embedding is done internally)
       const startSearch = performance.now();
-      const embedding = new Float32Array(embeddingResult.embedding);
-      const matches = findSimilarPatterns(embedding, k);
+      const matches = await findSimilarPatterns(input, { k });
       const searchTime = performance.now() - startSearch;
 
-      spinner.succeed(`Prediction complete (embed: ${embedTime.toFixed(1)}ms, search: ${searchTime.toFixed(1)}ms)`);
+      spinner.succeed(`Prediction complete (search: ${searchTime.toFixed(1)}ms)`);
 
       output.writeln();
 
