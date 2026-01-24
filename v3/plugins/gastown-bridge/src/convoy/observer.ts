@@ -574,9 +574,9 @@ export class ConvoyObserver extends EventEmitter {
   // =========================================================================
 
   /**
-   * Poll convoy for completion
+   * Poll convoy for completion with exponential backoff
    */
-  private async pollConvoy(
+  private async pollConvoyWithBackoff(
     convoyId: string,
     callback: CompletionCallback
   ): Promise<void> {
@@ -598,7 +598,38 @@ export class ConvoyObserver extends EventEmitter {
       }
 
       const result = await this.checkCompletion(convoyId);
-      callback(convoy, result.allComplete);
+
+      // Delta-based updates: only emit if state changed
+      const currentState = JSON.stringify({
+        allComplete: result.allComplete,
+        progress: result.progress,
+        openIssues: result.openIssues.length,
+        inProgress: result.inProgressIssues.length,
+        blocked: result.blockedIssues.length,
+      });
+
+      const stateChanged = watcher.lastState !== currentState;
+      watcher.lastState = currentState;
+
+      if (this.config.deltaUpdatesOnly && !stateChanged) {
+        // No state change - increase backoff interval
+        if (this.config.useExponentialBackoff) {
+          watcher.currentInterval = Math.min(
+            watcher.currentInterval * this.config.backoffMultiplier,
+            this.config.maxBackoffInterval
+          );
+        }
+      } else {
+        // State changed - reset to initial interval and call callback
+        watcher.currentInterval = this.config.pollInterval;
+        callback(convoy, result.allComplete);
+
+        // Emit debounced progress update
+        const emitter = this.progressEmitters.get(convoyId);
+        if (emitter) {
+          emitter.update(result.progress);
+        }
+      }
 
       watcher.attempts++;
 
@@ -612,13 +643,46 @@ export class ConvoyObserver extends EventEmitter {
           attempts: watcher.attempts,
         });
         this.stopWatching(convoyId);
+        return;
       }
+
+      // Schedule next poll with current interval (possibly backed off)
+      clearTimeout(watcher.timer);
+      watcher.timer = setTimeout(async () => {
+        await this.pollConvoyWithBackoff(convoyId, callback);
+      }, watcher.currentInterval);
+
     } catch (error) {
       this.logger.error('Poll error', {
         convoyId,
         error: error instanceof Error ? error.message : String(error),
       });
+
+      // On error, increase backoff more aggressively
+      if (this.config.useExponentialBackoff) {
+        watcher.currentInterval = Math.min(
+          watcher.currentInterval * (this.config.backoffMultiplier * 1.5),
+          this.config.maxBackoffInterval
+        );
+      }
+
+      // Schedule retry with backed-off interval
+      clearTimeout(watcher.timer);
+      watcher.timer = setTimeout(async () => {
+        await this.pollConvoyWithBackoff(convoyId, callback);
+      }, watcher.currentInterval);
     }
+  }
+
+  /**
+   * Legacy poll convoy method (without backoff)
+   * @deprecated Use pollConvoyWithBackoff instead
+   */
+  private async pollConvoy(
+    convoyId: string,
+    callback: CompletionCallback
+  ): Promise<void> {
+    return this.pollConvoyWithBackoff(convoyId, callback);
   }
 
   /**
