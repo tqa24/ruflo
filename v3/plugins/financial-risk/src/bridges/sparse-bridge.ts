@@ -42,7 +42,7 @@ interface SparseWasmModule {
   detect_anomalies(modelPtr: number, data: Float32Array, numSamples: number, featureDim: number, threshold: number): Uint32Array;
   classify_regime(modelPtr: number, marketData: Float32Array, windowSize: number): number;
   free_model(modelPtr: number): void;
-  memory: WebAssembly.Memory;
+  memory: { buffer: ArrayBuffer };
 }
 
 /**
