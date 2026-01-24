@@ -397,18 +397,40 @@ export class SyncBridge {
 
     this.logger.info(`Starting sync to AgentDB: ${beads.length} beads`);
 
-    // Process in batches
+    // Process in batches with parallel lookups
     for (let i = 0; i < beads.length; i += this.config.batchSize) {
       const batch = beads.slice(i, i + this.config.batchSize);
 
-      for (const bead of batch) {
-        try {
-          const key = this.beadToKey(bead);
-          const existing = await this.agentDB.retrieve(key, this.config.agentdbNamespace);
+      // Parallel lookup for all beads in batch
+      const lookupPromises = batch.map(async (bead) => {
+        const key = this.beadToKey(bead);
+        const cacheKey = hashKey([key, this.config.agentdbNamespace]);
 
+        // Check cache first
+        if (agentDBLookupCache.has(cacheKey)) {
+          return { bead, key, existing: agentDBLookupCache.get(cacheKey) };
+        }
+
+        const existing = await this.agentDB.retrieve(key, this.config.agentdbNamespace);
+        agentDBLookupCache.set(cacheKey, existing);
+        return { bead, key, existing };
+      });
+
+      const lookupResults = await Promise.all(lookupPromises);
+
+      // Process results
+      for (const { bead, key, existing } of lookupResults) {
+        try {
           if (existing) {
-            // Check for conflicts
-            const hasConflict = await this.detectConflict(bead, existing);
+            // Check for conflicts (use cache)
+            const conflictCacheKey = hashKey([bead.id, bead.content, existing.key]);
+            let hasConflict = conflictCache.get(conflictCacheKey);
+
+            if (hasConflict === undefined) {
+              hasConflict = await this.detectConflict(bead, existing);
+              conflictCache.set(conflictCacheKey, hasConflict);
+            }
+
             if (hasConflict) {
               const resolved = await this.resolveConflict(bead, existing);
               if (!resolved) {
@@ -428,6 +450,10 @@ export class SyncBridge {
             this.config.agentdbNamespace,
             this.buildMetadata(bead)
           );
+
+          // Invalidate lookup cache for this key
+          const cacheKey = hashKey([key, this.config.agentdbNamespace]);
+          agentDBLookupCache.delete(cacheKey);
 
           result.synced++;
         } catch (error) {
