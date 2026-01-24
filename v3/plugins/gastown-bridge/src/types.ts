@@ -777,7 +777,7 @@ export type TargetAgent = SlingTarget;
 /**
  * Convoy strategy type
  */
-export type ConvoyStrategy = 'fastest' | 'balanced' | 'throughput' | 'minimal_context_switches';
+export type ConvoyStrategy = 'parallel' | 'serial' | 'hybrid' | 'fastest' | 'balanced' | 'throughput' | 'minimal_context_switches';
 
 /**
  * Dependency action type (for graph operations)
